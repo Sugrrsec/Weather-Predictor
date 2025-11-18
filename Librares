@@ -1,0 +1,21 @@
+
+!pip install -q --upgrade gdown seaborn scikit-learn
+
+import tensorflow as tf
+print("TensorFlow version:", tf.__version__)
+# for zip file 
+import zipfile
+
+with zipfile.ZipFile('/content/dataset.zip', 'r') as zip_ref:
+    zip_ref.extractall('/content/dataset_raw')
+
+print("Unzipped into /content/dataset_raw")
+# libraries required
+numpy
+pillow
+tensorflow
+gradio
+matplotlib
+seaborn
+os
+json
