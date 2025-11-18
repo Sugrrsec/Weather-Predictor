@@ -1,0 +1,12 @@
+dataset_raw/
+   cloudy/
+   foggy/
+   lightning/
+   rainbow/
+   rainy/
+   rime/
+   sandstorm/
+   sunrise/
+We used a publicly available weather image dataset originally sourced from Kaggle, containing 8 weather categories.
+Weather Image Dataset
+https://share.google/gaR6YJYCIMrhmkxVI
