@@ -1,0 +1,224 @@
+#to import google drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+from pathlib import Path
+DRIVE_ROOT = Path('/content/drive/MyDrive')
+PROJECT_DIR = DRIVE_ROOT / 'weather_project_colab'
+PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+print("Project dir on Drive:", PROJECT_DIR)
+
+from pathlib import Path
+
+SRC_TRAIN = Path("/content/dataset_raw")
+
+print("Source train path:", SRC_TRAIN)
+print("Exists?", SRC_TRAIN.exists())
+#for zip file
+# Cell 8 — list saved files and make a zip for download if needed
+!ls -la /content/models
+!ls -la "/content/drive/MyDrive/weather_project_colab/models"
+
+# Create a zip of models in Drive for easy download
+import shutil
+shp = PROJECT_DIR / 'models'
+zip_out = PROJECT_DIR / 'models_zip'
+if zip_out.exists():
+    shutil.rmtree(zip_out)
+shutil.make_archive(str(zip_out), 'zip', root_dir=str(shp))
+print("Models zipped at:", zip_out.with_suffix('.zip'))
+import zipfile
+
+with zipfile.ZipFile('/content/dataset.zip', 'r') as zip_ref:
+    zip_ref.extractall('/content/dataset_raw')
+
+print("Unzipped into /content/dataset_raw")
+#prediction model
+import os, json
+from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Flatten
+from tensorflow.keras import Sequential
+from sklearn.metrics import classification_report, confusion_matrix
+
+DATA_DIR = Path('/content/weather_dataset')
+
+
+TRAIN_DIR = str(DATA_DIR / 'train')
+VAL_DIR = str(DATA_DIR / 'validation')
+TEST_DIR = str(DATA_DIR / 'test')
+
+MODELS_DIR = Path('/content/models')
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+EPOCHS = 10
+
+train_datagen = ImageDataGenerator(rescale=1./255,
+                                   rotation_range=20,
+                                   width_shift_range=0.1,
+                                   height_shift_range=0.1,
+                                   shear_range=0.1,
+                                   zoom_range=0.1,
+                                   horizontal_flip=True,
+                                   fill_mode='nearest')
+valid_datagen = ImageDataGenerator(rescale=1./255)
+
+train_data = train_datagen.flow_from_directory(TRAIN_DIR, target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical', shuffle=True)
+val_data = valid_datagen.flow_from_directory(VAL_DIR, target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical', shuffle=False)
+test_data = valid_datagen.flow_from_directory(TEST_DIR, target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical', shuffle=False)
+
+NUM_CLASSES = train_data.num_classes
+print("Detected classes:", NUM_CLASSES, train_data.class_indices)
+
+with open(MODELS_DIR / 'class_indices.json', 'w') as f:
+    json.dump(train_data.class_indices, f)
+
+data_aug = keras.Sequential([
+    keras.layers.RandomFlip("horizontal", input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)),
+    keras.layers.RandomRotation(0.05),
+    keras.layers.RandomZoom(0.05),
+])
+model = Sequential([
+    data_aug,
+    Conv2D(16, 3, activation='relu', padding='same'),
+    MaxPooling2D(2,2),
+    Conv2D(32, 3, activation='relu', padding='same'),
+    MaxPooling2D(2,2),
+    Conv2D(64, 3, activation='relu', padding='same'),
+    MaxPooling2D(2,2),
+    Flatten(),
+    Dense(256, activation='relu'),
+    Dense(NUM_CLASSES, activation='softmax')
+])
+model.compile(loss='categorical_crossentropy', optimizer=keras.optimizers.Adam(1e-3), metrics=['accuracy'])
+model.summary()
+
+ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+cp = str(MODELS_DIR / f'best_model_{ts}.h5')
+es = keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+mc = keras.callbacks.ModelCheckpoint(cp, monitor='val_loss', save_best_only=True)
+
+history = model.fit(train_data, epochs=EPOCHS, validation_data=val_data, callbacks=[es, mc])
+
+final_model_path = MODELS_DIR / 'weather.keras'
+model.save(final_model_path)
+print("Saved model to", final_model_path)
+
+DRIVE_MODELS_DIR = PROJECT_DIR / 'models'
+if DRIVE_MODELS_DIR.exists():
+    import shutil
+    shutil.rmtree(DRIVE_MODELS_DIR)
+shutil.copytree(MODELS_DIR, DRIVE_MODELS_DIR)
+print("Copied model artifacts to Drive at:", DRIVE_MODELS_DIR)
+
+plt.figure(figsize=(8,4)); plt.plot(history.history['accuracy'], label='train_acc'); plt.plot(history.history['val_accuracy'], label='val_acc'); plt.legend(); plt.title('Accuracy'); plt.show()
+plt.figure(figsize=(8,4)); plt.plot(history.history['loss'], label='train_loss'); plt.plot(history.history['val_loss'], label='val_loss'); plt.legend(); plt.title('Loss'); plt.show()
+
+
+test_loss, test_acc = model.evaluate(test_data)
+print("Test accuracy:", test_acc)
+
+preds = model.predict(test_data)
+y_pred = np.argmax(preds, axis=1)
+y_true = test_data.classes
+labels = list(train_data.class_indices.keys())
+print("Classification report:")
+print(classification_report(y_true, y_pred, target_names=labels))
+
+cm = confusion_matrix(y_true, y_pred)
+plt.figure(figsize=(10,8)); sns.heatmap(cm, annot=True, fmt='d', xticklabels=labels, yticklabels=labels, cmap='Blues'); plt.xlabel('Predicted'); plt.ylabel('True'); plt.show()
+#to connect ui
+from pathlib import Path
+import shutil, os
+
+
+DRIVE_MODELS = Path('/content/drive/MyDrive/weather_project_colab/models')
+LOCAL_MODELS = Path('/content/models')
+
+try:
+    from google.colab import drive
+    drive.mount('/content/drive', force_remount=False)
+except Exception:
+    pass
+
+if LOCAL_MODELS.exists():
+    print("Local models folder already present:", list(p.name for p in LOCAL_MODELS.iterdir()))
+elif DRIVE_MODELS.exists():
+    print("Copying models from Drive -> /content/models ...")
+    shutil.copytree(DRIVE_MODELS, LOCAL_MODELS)
+    print("Copied. /content/models contains:", list(p.name for p in LOCAL_MODELS.iterdir()))
+else:
+    print("No model found locally or in Drive at", DRIVE_MODELS)
+    print("-> Upload your models folder via the Files panel (left) or place it in Drive and re-run this cell.")
+#UI
+import json, io
+from pathlib import Path
+from PIL import Image, ImageOps
+import numpy as np
+import tensorflow as tf
+from IPython.display import display, HTML
+
+MODEL_DIR = Path('/content/models')
+MODEL_PATH = MODEL_DIR / 'weather.keras'
+CLASSES_PATH = MODEL_DIR / 'class_indices.json'
+
+assert MODEL_PATH.exists(), f"Model folder missing: {MODEL_PATH}"
+assert CLASSES_PATH.exists(), f"class_indices.json missing: {CLASSES_PATH}"
+
+print("Loading model (this may take a few seconds)...")
+model = tf.keras.models.load_model(str(MODEL_PATH))
+with open(str(CLASSES_PATH),'r') as f:
+    class_indices = json.load(f)
+index_to_label = {int(v): k for k, v in class_indices.items()}
+NUM_CLASSES = len(index_to_label)
+print("Model loaded. Classes:", index_to_label)
+
+
+def predict_image_pil(pil_img, input_size=(224,224), top_k=3):
+    img = pil_img.convert("RGB")
+    img = ImageOps.fit(img, input_size, Image.Resampling.LANCZOS)
+    x = np.asarray(img).astype("float32")/255.0
+    x = np.expand_dims(x, 0)
+    preds = model.predict(x)[0]
+    idxs = preds.argsort()[-top_k:][::-1]
+    results = [(index_to_label[int(i)], float(preds[int(i)])) for i in idxs]
+    return results, { index_to_label[i]: float(preds[i]) for i in range(len(preds)) }
+from google.colab import files
+from IPython.display import display, HTML, Image as IPyImage
+import base64, os
+
+print("Choose an image file to upload (jpg/png). A file dialog will open.")
+uploaded = files.upload()
+if not uploaded:
+    print("No file uploaded. Re-run this cell and select an image.")
+else:
+
+    fname = next(iter(uploaded.keys()))
+    print("Uploaded:", fname)
+
+    pil_img = Image.open(io.BytesIO(uploaded[fname])).convert("RGB")
+    display(pil_img.resize((360,360)))
+
+    top_k = 3
+    results, all_probs = predict_image_pil(pil_img, input_size=(224,224), top_k=top_k)
+
+    html = "<div style='font-family:Arial;max-width:700px;'>"
+    html += "<h3>Top predictions</h3>"
+    for rank, (label, prob) in enumerate(results, start=1):
+        pct = prob*100
+        html += f"<div style='display:flex;justify-content:space-between'><strong>{rank}. {label}</strong><span>{pct:.2f}%</span></div>"
+        html += f"<div style='background:#eee;border-radius:6px;height:14px;margin:6px 0'>"
+        html += f"<div style='width:{pct:.2f}%;background:#007bff;height:100%;border-radius:6px'></div></div>"
+    html += "<h4>All probabilities</h4><pre style='font-size:0.9rem'>{}</pre>".format(json.dumps(all_probs, indent=2))
+    html += "</div>"
+    display(HTML(html))
+#end
+
